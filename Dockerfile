@@ -1,24 +1,23 @@
 # ---- Builder stage -------------------------------------------------
 FROM node:22-alpine AS builder
 
-# Enable corepack so pnpm works
+# Enable pnpm via corepack
 RUN corepack enable
 
 WORKDIR /app
 
-# Copy monorepo configs first for better layer caching
+# Copy monorepo configs first (for layer caching)
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 
-# Copy only what we need to build the web app
+# Copy workspaces (you may also have `packages/` or others)
 COPY apps ./apps
 COPY packages ./packages
 
-# Install deps (uses pnpm-lock.yaml)
+# Install all workspace deps using pnpm
 RUN pnpm install --frozen-lockfile
 
-# Build the web app (workspace name may be "web" or "@formbricks/web")
-# Adjust the filter if their workspace name is different.
-RUN pnpm turbo run build --filter=web...
+# Build ONLY the web app workspace (@formbricks/web)
+RUN pnpm --filter @formbricks/web build
 
 # ---- Runtime stage -------------------------------------------------
 FROM node:22-alpine AS runner
@@ -26,13 +25,11 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Copy built artifacts & runtime files from builder
-COPY --from=builder /app/apps/web ./
-# If you hit "missing module" errors, you can instead copy the whole repo:
-# COPY --from=builder /app ./
+# We’ll copy the whole repo over to be safe (keeps prisma/i18n/etc)
+COPY --from=builder /app ./
 
-# Next.js usually serves from .next
+# Expose the port Formbricks uses
 EXPOSE 3000
 
-# If apps/web/package.json uses "start": "next start"
-CMD ["pnpm", "start"]
+# Start the web app using its package.json scripts
+CMD ["pnpm", "--filter", "@formbricks/web", "start"]
